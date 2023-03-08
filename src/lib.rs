@@ -1,5 +1,22 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+pub trait App {
+    fn add(&mut self, left: usize, right: usize) -> usize;
+}
+
+struct TestGame {
+    val: usize,
+}
+
+impl TestGame {
+    fn new(val: usize) -> TestGame {
+        TestGame { val }
+    }
+}
+
+impl App for TestGame {
+    fn add(&mut self, left: usize, right: usize) -> usize {
+        self.val += left + right;
+        self.val
+    }
 }
 
 #[cfg(test)]
@@ -8,7 +25,8 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+        let mut game = TestGame::new(3);
+        let result = game.add(2, 2);
+        assert_eq!(result, 7);
     }
 }
