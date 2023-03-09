@@ -66,10 +66,7 @@ impl Scene {
     }
 
     fn render(&mut self) {
-        // self.frame = Array2::<char>::default((10, 10));
         for (_, obj) in &mut self.object {
-            let asd = obj.visual.shape()[0];
-
             let x_start = if obj.placement.x < 0 {
                 0
             } else {
@@ -121,9 +118,12 @@ impl App {
         }
     }
 
-    fn display(&self) {
+    fn display(&mut self) {
         // print!("{:?}", self.scene[&self.current_scene]);
-        for char in &self.scene[&self.current_scene].frame {
+        let to_display = &mut self.scene.get_mut(&self.current_scene).unwrap();
+
+        to_display.render();
+        for char in &to_display.frame {
             if char != &'\0' {
                 print!("{} ", char);
             } else {
