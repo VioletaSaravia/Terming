@@ -68,28 +68,14 @@ impl Scene {
 
     fn render(&mut self) {
         for (_, obj) in &mut self.object {
-            let x_start = if obj.placement.x < 0 {
-                0
-            } else {
-                obj.placement.x
+            let (x_start, x_end) = match obj.placement.x {
+                x if x < 0 => (0, obj.size.x + x as usize),
+                x => (x, obj.size.x + x as usize),
             };
 
-            let x_end = if obj.placement.x < 0 {
-                obj.size.x - obj.placement.x.abs() as usize
-            } else {
-                obj.size.x + obj.placement.x as usize
-            };
-
-            let y_start = if obj.placement.y < 0 {
-                0
-            } else {
-                obj.placement.y
-            };
-
-            let y_end = if obj.placement.y < 0 {
-                obj.size.y - obj.placement.y.abs() as usize
-            } else {
-                obj.size.y + obj.placement.y as usize
+            let (y_start, y_end) = match obj.placement.y {
+                y if y < 0 => (0, obj.size.y + y as usize),
+                y => (y, obj.size.y + y as usize),
             };
 
             let mut obj_region = self
