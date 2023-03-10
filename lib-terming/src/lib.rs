@@ -3,49 +3,68 @@ use crossterm::execute;
 use crossterm::terminal::{Clear, ClearType};
 use ndarray::{arr2, s, Array2, AssignElem, Axis};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
+use std::fmt::Display;
 use std::fs::File;
 use std::io::{stdout, BufReader};
+use std::rc::Rc;
 use std::thread;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub fn rectangle(size: Dimension) -> Region {
-    let mut rectangle = Array2::<char>::default((size.x, size.y));
+    let mut rectangle = Array2::<Char>::default((size.x, size.y));
 
-    rectangle.index_axis_mut(ndarray::Axis(1), 0).fill('X');
+    rectangle
+        .index_axis_mut(ndarray::Axis(1), 0)
+        .fill('X'.into());
     rectangle
         .index_axis_mut(ndarray::Axis(1), size.y - 1)
-        .fill('X'); // size.y???
+        .fill('X'.into()); // size.y???
 
     rectangle.axis_iter_mut(Axis(1)).for_each(|mut line| {
-        line[0].assign_elem('X');
-        line[size.x - 1].assign_elem('X');
+        line[0].assign_elem('X'.into());
+        line[size.x - 1].assign_elem('X'.into());
     });
 
     rectangle
 }
 
-struct Char<'a> {
-    val: &'a str,
+#[derive(Clone, Debug)]
+pub struct Char {
+    val: String,
 }
 
-impl Char<'_> {
-    fn new(val: &str) -> Result<Self, Box<dyn Error>> {
+impl Char {
+    fn new(val: String) -> Result<Self, Box<dyn Error>> {
         match val.graphemes(true).count() {
-            1 => Ok(Char { val }),
-            0 => Ok(Char { val: " " }),
+            1 => Ok(Char { val: val }),
+            0 => Ok(Char { val: " ".into() }),
             _ => Err(format!("{} is not a single character", val).into()),
         }
     }
 }
 
-pub trait Collidable {
-    fn get_collision(&self) -> &Region;
-    fn set_collision(&mut self, new: Region);
+impl Default for Char {
+    fn default() -> Self {
+        Char::new("".into()).unwrap()
+    }
 }
 
-pub trait Scripted {
+impl From<char> for Char {
+    fn from(value: char) -> Self {
+        Char::new(value.into()).unwrap() // ugh
+    }
+}
+
+impl Display for Char {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.val)
+    }
+}
+
+pub trait Scriptable {
     fn setup(&mut self);
     fn update(&mut self);
 }
@@ -56,6 +75,12 @@ pub trait Renderable {
     fn get_placement(&self) -> &Coordinate;
     fn set_placement(&mut self, new: Coordinate);
     fn get_size(&self) -> &Dimension;
+}
+
+pub trait Collidable {
+    fn get_collision(&self) -> &Region;
+    fn set_collision(&mut self, new: Region);
+    fn check_collision(&self) -> Option<String>;
 }
 
 #[derive(Debug, Clone)]
@@ -70,7 +95,7 @@ pub struct Dimension {
     y: usize,
 }
 
-type Region = Array2<char>;
+type Region = Array2<Char>;
 
 #[derive(Debug)]
 pub struct Object {
@@ -110,13 +135,13 @@ impl Object {
     fn new(visual_path: String) -> Result<Object, Box<dyn Error>> {
         // let file = File::open(visual_path)?;
         // let reader = BufReader::new(file);
-        // let visual: Array2<char> = serde_json::from_reader(reader).unwrap();
+        // let visual: Array2<Char> = serde_json::from_reader(reader).unwrap();
 
-        let visual: Region = serde_json::from_str(&visual_path).unwrap();
-        let size = Dimension {
-            x: visual.shape()[0],
-            y: visual.shape()[1],
-        };
+        // let visual: Region = serde_json::from_str(&visual_path).unwrap();
+        // let size = Dimension {
+        //     x: visual.shape()[0],
+        //     y: visual.shape()[1],
+        // };
 
         let _test_visual = rectangle(Dimension { x: 10, y: 8 });
         let _test_size = Dimension { x: 10, y: 8 };
@@ -130,27 +155,35 @@ impl Object {
     }
 }
 
+type Script = RefCell<Rc<dyn Scriptable>>;
+type Render = RefCell<Rc<dyn Renderable>>;
+
 struct Scene {
-    object: HashMap<String, Box<dyn Renderable>>,
+    to_render: HashMap<String, Box<dyn Renderable>>,
+    to_run: HashMap<String, Script>, //???
     pub frame: Region,
 }
 
 impl Scene {
     fn new(object: HashMap<String, Box<dyn Renderable>>, resolution: Dimension) -> Scene {
-        let frame = Array2::<char>::default((resolution.x, resolution.y));
-        Scene { object, frame }
+        let frame = Array2::<Char>::default((resolution.x, resolution.y));
+        Scene {
+            to_render: object,
+            to_run: HashMap::new(),
+            frame,
+        }
     }
 
     fn new_object(&mut self, name: String) {
         let cube = arr2(&[['X', 'X'], ['X', 'X']]);
         let serialized_cube = serde_json::to_string(&cube).unwrap();
 
-        self.object
+        self.to_render
             .insert(name, Box::new(Object::new(serialized_cube).unwrap()));
     }
 
     fn render(&mut self) {
-        for (_, obj) in &self.object {
+        for (_, obj) in &self.to_render {
             let (x_start, x_end) = match obj.get_placement().x {
                 x if obj.get_size().x as i32 + x < 0 => return, // TODO agregar warning?
                 x if x < 0 => (0, obj.get_size().x + x as usize),
@@ -196,17 +229,13 @@ impl App {
 
     fn display(&mut self) {
         // print!("{:?}", self.scene[&self.current_scene]);
-        let to_display = &mut self.scene.get_mut(&self.current_scene).unwrap();
+        let to_display = self.scene.get_mut(&self.current_scene).unwrap();
 
         to_display.render();
 
         for line in to_display.frame.axis_iter(Axis(1)) {
             for char in line {
-                if char != &'\0' {
-                    print!("{} ", char);
-                } else {
-                    print!("  ");
-                }
+                print!("{} ", char);
             }
             print!("\n");
         }
@@ -228,7 +257,7 @@ mod tests {
 
     #[test]
     fn it_works() -> Result<(), Box<dyn Error>> {
-        let mut test_game = App::new(3, Dimension { x: 40, y: 30 }, HashMap::new());
+        let mut test_game = App::new(1, Dimension { x: 40, y: 30 }, HashMap::new());
 
         test_game.new_scene("test_scene".into());
 
