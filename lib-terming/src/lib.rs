@@ -13,12 +13,23 @@ use std::rc::Rc;
 use std::thread;
 use unicode_segmentation::UnicodeSegmentation;
 
+// TODO Lineas que no sean de 90°
+pub fn draw_line(vector: Coordinate) -> Region {
+    let (x, y): (usize, usize) = (
+        vector.x.abs().try_into().unwrap(),
+        vector.y.abs().try_into().unwrap(),
+    );
+    let mut result = Array2::<Char>::default((x + 1, y + 1));
+
+    result.fill('X'.into());
+
+    result
+}
+
 pub fn rectangle(size: Dimension) -> Region {
     let mut rectangle = Array2::<Char>::default((size.x, size.y));
 
-    rectangle
-        .index_axis_mut(ndarray::Axis(1), 0)
-        .fill('X'.into());
+    rectangle.index_axis_mut(Axis(1), 0).fill('X'.into());
     rectangle
         .index_axis_mut(ndarray::Axis(1), size.y - 1)
         .fill('X'.into()); // size.y???
@@ -64,6 +75,8 @@ impl Display for Char {
     }
 }
 
+pub trait GameObject {}
+
 pub trait Scriptable {
     fn setup(&mut self);
     fn update(&mut self);
@@ -97,13 +110,14 @@ pub struct Dimension {
 
 type Region = Array2<Char>;
 
-#[derive(Debug)]
 pub struct Object {
     placement: Coordinate,
     visual: Region,
     size: Dimension,
     layer: usize,
 }
+
+impl GameObject for Object {}
 
 impl Renderable for Object {
     fn get_visual(&self) -> &Region {
@@ -133,16 +147,6 @@ impl Renderable for Object {
 
 impl Object {
     fn new(visual_path: String) -> Result<Object, Box<dyn Error>> {
-        // let file = File::open(visual_path)?;
-        // let reader = BufReader::new(file);
-        // let visual: Array2<Char> = serde_json::from_reader(reader).unwrap();
-
-        // let visual: Region = serde_json::from_str(&visual_path).unwrap();
-        // let size = Dimension {
-        //     x: visual.shape()[0],
-        //     y: visual.shape()[1],
-        // };
-
         let _test_visual = rectangle(Dimension { x: 10, y: 8 });
         let _test_size = Dimension { x: 10, y: 8 };
 
@@ -159,16 +163,18 @@ type Script = RefCell<Rc<dyn Scriptable>>;
 type Render = RefCell<Rc<dyn Renderable>>;
 
 struct Scene {
-    to_render: HashMap<String, Box<dyn Renderable>>,
+    objects: HashMap<String, RefCell<Rc<dyn GameObject>>>,
+    to_render: HashMap<String, RefCell<Rc<dyn Renderable>>>,
     to_run: HashMap<String, Script>, //???
     pub frame: Region,
 }
 
 impl Scene {
-    fn new(object: HashMap<String, Box<dyn Renderable>>, resolution: Dimension) -> Scene {
+    fn new(resolution: Dimension) -> Scene {
         let frame = Array2::<Char>::default((resolution.x, resolution.y));
         Scene {
-            to_render: object,
+            objects: HashMap::new(),
+            to_render: HashMap::new(),
             to_run: HashMap::new(),
             frame,
         }
@@ -176,14 +182,16 @@ impl Scene {
 
     fn new_object(&mut self, name: String) {
         let cube = arr2(&[['X', 'X'], ['X', 'X']]);
-        let serialized_cube = serde_json::to_string(&cube).unwrap();
+        let cube = serde_json::to_string(&cube).unwrap();
+        let cube = RefCell::new(Rc::new(Object::new(cube).unwrap()));
 
-        self.to_render
-            .insert(name, Box::new(Object::new(serialized_cube).unwrap()));
+        self.objects.insert(name.clone(), cube.clone());
+        self.to_render.insert(name, cube.clone());
     }
 
     fn render(&mut self) {
         for (_, obj) in &self.to_render {
+            let obj = obj.borrow();
             let (x_start, x_end) = match obj.get_placement().x {
                 x if obj.get_size().x as i32 + x < 0 => return, // TODO agregar warning?
                 x if x < 0 => (0, obj.get_size().x + x as usize),
@@ -200,6 +208,7 @@ impl Scene {
                 .frame
                 .slice_mut(s![x_start..x_end as i32, y_start..y_end as i32]);
 
+            // obj_region.assign(obj.get().get_visual().view());
             obj_region.assign(&obj.get_visual().view());
         }
     }
@@ -223,7 +232,7 @@ impl App {
     }
 
     pub fn new_scene(&mut self, name: String) {
-        let new_scene = Scene::new(HashMap::new(), self.resolution.clone());
+        let new_scene = Scene::new(self.resolution.clone());
         self.scene.insert(name, Box::new(new_scene));
     }
 
@@ -249,6 +258,10 @@ impl App {
             execute!(stdout, Clear(ClearType::All))?;
         }
     }
+
+    pub fn scene(&mut self, name: &str) -> &mut Box<Scene> {
+        self.scene.get_mut(name).unwrap()
+    }
 }
 
 #[cfg(test)]
@@ -261,11 +274,9 @@ mod tests {
 
         test_game.new_scene("test_scene".into());
 
-        test_game
-            .scene
-            .get_mut("test_scene")
-            .unwrap()
-            .new_object("Cube".to_owned());
+        test_game.scene("test_scene").new_object("Cube".to_owned());
+
+        // test_game.scene("test_scene").objects["Cube"];
 
         test_game.start()
     }
